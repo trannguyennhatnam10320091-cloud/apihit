@@ -118,8 +118,8 @@ if (!fs.existsSync(input)) {
 }
 
 const options = {
-    minHistory: Number(process.env.MIN_HISTORY) || 12,
-    maxEngineHistory: Number(process.env.MAX_ENGINE_HISTORY) || 20,
+    minHistory: Number(process.env.MIN_HISTORY) || 20,
+    maxEngineHistory: Number(process.env.MAX_ENGINE_HISTORY) || 240,
     maxRuntimeHistory: 20000,
     predictEdge: Number(process.env.PREDICT_EDGE) || 0.014,
     minConsensus: Number(process.env.MIN_CONSENSUS) || 0.56
@@ -131,7 +131,7 @@ let totalPredictions = 0;
 let totalWins = 0;
 let totalRounds = 0;
 
-console.log(`Backtest V7: ${path.basename(input)}`);
+console.log(`Backtest V8 Regime-Markov Guard: ${path.basename(input)}`);
 console.log(`Tham số: ${JSON.stringify(options)}`);
 for (const board of boards) {
     const boardRows = rows.filter(row => row.board === board);
