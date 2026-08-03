@@ -1,3 +1,16 @@
+# HIT API V8 — Regime Markov Guard
+
+Bản này viết lại bộ dự đoán theo hướng đọc loại cầu + Markov và giảm cược ép. API endpoint vẫn giữ nguyên để bot cũ dùng được.
+
+## Điểm mới
+
+- Nhận diện: bệt, 1-1, 2-2, 3-3, lệch Tài/Xỉu, theo nhịp, đảo nhịp, hỗn hợp.
+- Markov bậc 1–4 và so khớp hậu tố 2–6.
+- Chuyên gia chỉ được coi là đáng tin sau ít nhất 30 lần chấm và đạt 60% trong 40 lần gần nhất.
+- Sau 3 lần sai liên tiếp, tự SKIP 1 phiên.
+- Không dùng random fallback.
+- Giữ nguyên `/api/hitxanh`, `/api/hitmd5`, `/api/dashboard`, reset/export và cấu trúc bot.
+
 # HIT Adaptive Selective Runtime API V7
 
 Repo API mới hoàn toàn cho hai bàn **Bàn Hũ (`xanh`)** và **Bàn MD5 (`md5`)**.

@@ -1,7 +1,7 @@
 'use strict';
 
-const MODEL_VERSION = '7.0.0';
-const ENGINE_NAME = 'ADAPTIVE_SELECTIVE_RUNTIME_V7';
+const MODEL_VERSION = '8.0.0';
+const ENGINE_NAME = 'REGIME_MARKOV_GUARD_V8';
 
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, Number(value) || 0));
@@ -26,7 +26,7 @@ function opposite(symbol) {
     return symbol === 'T' ? 'X' : 'T';
 }
 
-function betaMean(successes, trials, prior = 3) {
+function betaMean(successes, trials, prior = 4) {
     return (successes + prior) / (trials + prior * 2);
 }
 
@@ -54,6 +54,220 @@ function ratioT(symbols) {
     return symbols.filter(symbol => symbol === 'T').length / symbols.length;
 }
 
+function detectRegime(symbols) {
+    if (!symbols.length) {
+        return {
+            type: 'CHƯA_CÓ',
+            description: 'Chưa có dữ liệu để đọc cầu.',
+            strength: 0,
+            currentRun: { symbol: null, length: 0 },
+            switchRate: 0.5,
+            ratioT: 0.5,
+            changeScore: 0
+        };
+    }
+
+    const recent12 = symbols.slice(-12);
+    const recent20 = symbols.slice(-20);
+    const previous12 = symbols.slice(-24, -12);
+    const runs = buildRuns(symbols.slice(-30));
+    const currentRun = runs[runs.length - 1] || { symbol: symbols[symbols.length - 1], length: 1 };
+    const recentSwitch = switchRate(recent12);
+    const previousSwitch = previous12.length >= 6 ? switchRate(previous12) : recentSwitch;
+    const recentRatio = ratioT(recent12);
+    const previousRatio = previous12.length >= 6 ? ratioT(previous12) : recentRatio;
+    const changeScore = clamp(Math.abs(recentSwitch - previousSwitch) * 0.55 + Math.abs(recentRatio - previousRatio) * 0.45, 0, 1);
+    const runLengths = runs.slice(-6).map(item => item.length);
+
+    let type = 'CẦU_HỖN_HỢP';
+    let description = 'Nhịp cầu chưa tạo cấu trúc đủ rõ; Markov chỉ đóng vai trò kiểm chứng.';
+    let strength = 0.2;
+
+    if (recent12.length >= 8 && recentSwitch >= 0.8) {
+        type = 'CẦU_1-1';
+        strength = clamp((recentSwitch - 0.65) / 0.25, 0, 1);
+        description = 'Hai cửa đang đảo đều theo nhịp 1-1.';
+    } else if (currentRun.length >= 4) {
+        type = 'CẦU_BỆT';
+        strength = clamp(currentRun.length / 7, 0, 1);
+        description = `Đang bệt ${toResult(currentRun.symbol)} ${currentRun.length} phiên.`;
+    } else {
+        for (const block of [2, 3]) {
+            const completed = runLengths.slice(0, -1).slice(-4);
+            const exact = completed.filter(length => length === block).length;
+            if (completed.length >= 3 && exact >= 3 && currentRun.length <= block) {
+                type = `CẦU_${block}-${block}`;
+                strength = exact / completed.length;
+                description = `Các nhịp gần đây chủ yếu chạy theo khối ${block}-${block}.`;
+                break;
+            }
+        }
+
+        if (type === 'CẦU_HỖN_HỢP' && recentRatio >= 0.72) {
+            type = 'LỆCH_TÀI';
+            strength = clamp((recentRatio - 0.6) / 0.3, 0, 1);
+            description = `Tài chiếm ${Math.round(recentRatio * 100)}% trong cửa sổ gần.`;
+        } else if (type === 'CẦU_HỖN_HỢP' && recentRatio <= 0.28) {
+            type = 'LỆCH_XỈU';
+            strength = clamp((0.4 - recentRatio) / 0.3, 0, 1);
+            description = `Xỉu chiếm ${Math.round((1 - recentRatio) * 100)}% trong cửa sổ gần.`;
+        } else if (type === 'CẦU_HỖN_HỢP' && recentSwitch >= 0.68) {
+            type = 'ĐẢO_NHỊP';
+            strength = clamp((recentSwitch - 0.55) / 0.3, 0, 1);
+            description = 'Tần suất đổi cửa đang cao.';
+        } else if (type === 'CẦU_HỖN_HỢP' && recentSwitch <= 0.32) {
+            type = 'THEO_NHỊP';
+            strength = clamp((0.45 - recentSwitch) / 0.3, 0, 1);
+            description = 'Tần suất giữ cửa đang cao.';
+        }
+    }
+
+    return {
+        type,
+        description,
+        strength: round(strength),
+        currentRun: { symbol: currentRun.symbol, result: toResult(currentRun.symbol), length: currentRun.length },
+        switchRate: round(switchRate(recent20)),
+        ratioT: round(ratioT(recent20)),
+        changeScore: round(changeScore)
+    };
+}
+
+function markovOrder(symbols, order, window = 240) {
+    if (symbols.length <= order) return null;
+    const state = symbols.slice(-order).join('');
+    let tWeight = 0;
+    let xWeight = 0;
+    let samples = 0;
+    const start = Math.max(order, symbols.length - window);
+
+    for (let index = start; index < symbols.length; index += 1) {
+        if (symbols.slice(index - order, index).join('') !== state) continue;
+        const age = symbols.length - 1 - index;
+        const weight = 0.5 ** (age / 90);
+        if (symbols[index] === 'T') tWeight += weight;
+        else xWeight += weight;
+        samples += 1;
+    }
+
+    if (samples < 3) return null;
+    const effective = tWeight + xWeight;
+    return {
+        order,
+        samples,
+        probabilityT: (tWeight + 4) / (effective + 8),
+        evidence: clamp(samples / 14, 0, 1)
+    };
+}
+
+function markovExpert(symbols) {
+    const rows = [1, 2, 3, 4].map(order => markovOrder(symbols, order)).filter(Boolean);
+    if (!rows.length) return null;
+    let numerator = 0;
+    let denominator = 0;
+    for (const row of rows) {
+        const weight = row.evidence * (1 + (row.order - 1) * 0.08);
+        numerator += row.probabilityT * weight;
+        denominator += weight;
+    }
+    return {
+        id: 'markov',
+        name: 'Markov bậc 1-4',
+        probabilityT: denominator ? numerator / denominator : 0.5,
+        evidence: rows.reduce((sum, row) => sum + row.evidence, 0) / rows.length,
+        samples: rows.reduce((sum, row) => sum + row.samples, 0),
+        detail: `Markov đọc các trạng thái bậc ${rows.map(row => row.order).join(', ')}.`
+    };
+}
+
+function suffixExpert(symbols) {
+    const rows = [];
+    for (const length of [2, 3, 4, 5, 6]) {
+        if (symbols.length <= length) continue;
+        const suffix = symbols.slice(-length).join('');
+        let tWeight = 0;
+        let xWeight = 0;
+        let samples = 0;
+        const start = Math.max(length, symbols.length - 360);
+        for (let index = start; index < symbols.length; index += 1) {
+            if (symbols.slice(index - length, index).join('') !== suffix) continue;
+            const age = symbols.length - 1 - index;
+            const weight = 0.5 ** (age / 120);
+            if (symbols[index] === 'T') tWeight += weight;
+            else xWeight += weight;
+            samples += 1;
+        }
+        if (samples < 4) continue;
+        const effective = tWeight + xWeight;
+        rows.push({
+            length,
+            samples,
+            probabilityT: (tWeight + 4) / (effective + 8),
+            evidence: clamp(samples / 18, 0, 1)
+        });
+    }
+    if (!rows.length) return null;
+    let numerator = 0;
+    let denominator = 0;
+    for (const row of rows) {
+        const weight = row.evidence * (1 + (row.length - 2) * 0.05);
+        numerator += row.probabilityT * weight;
+        denominator += weight;
+    }
+    return {
+        id: 'suffix',
+        name: 'Lặp chuỗi hậu tố',
+        probabilityT: denominator ? numerator / denominator : 0.5,
+        evidence: rows.reduce((sum, row) => sum + row.evidence, 0) / rows.length,
+        samples: rows.reduce((sum, row) => sum + row.samples, 0),
+        detail: `So khớp các chuỗi dài ${rows.map(row => row.length).join(', ')} với lịch sử trước đó.`
+    };
+}
+
+function regimeExpert(symbols, regime) {
+    if (!symbols.length) return null;
+    const last = symbols[symbols.length - 1];
+    const runLength = regime.currentRun?.length || 1;
+    let symbol = null;
+    let probability = 0.5;
+
+    if (regime.type === 'CẦU_1-1' || regime.type === 'ĐẢO_NHỊP') {
+        symbol = opposite(last);
+        probability = 0.5 + 0.045 * regime.strength;
+    } else if (regime.type === 'CẦU_BỆT' || regime.type === 'THEO_NHỊP') {
+        symbol = last;
+        probability = 0.5 + 0.035 * regime.strength;
+    } else if (regime.type === 'CẦU_2-2') {
+        symbol = runLength < 2 ? last : opposite(last);
+        probability = 0.55;
+    } else if (regime.type === 'CẦU_3-3') {
+        symbol = runLength < 3 ? last : opposite(last);
+        probability = 0.55;
+    } else if (regime.type === 'LỆCH_TÀI') {
+        symbol = 'T';
+        probability = 0.54;
+    } else if (regime.type === 'LỆCH_XỈU') {
+        symbol = 'X';
+        probability = 0.54;
+    }
+
+    if (!symbol) return null;
+    return {
+        id: 'regime',
+        name: 'Máy đọc loại cầu',
+        probabilityT: symbol === 'T' ? probability : 1 - probability,
+        evidence: clamp(regime.strength, 0.2, 1),
+        samples: symbols.length,
+        detail: `${regime.type}: ${regime.description}`
+    };
+}
+
+const EXPERTS = [
+    { id: 'markov', name: 'Markov bậc 1-4' },
+    { id: 'suffix', name: 'Lặp chuỗi hậu tố' },
+    { id: 'regime', name: 'Máy đọc loại cầu' }
+];
+
 function defaultStats() {
     return {
         Tong_phien: 0,
@@ -75,292 +289,18 @@ function defaultExpertState() {
         predictions: 0,
         wins: 0,
         losses: 0,
-        ewmaAccuracy: 0.5,
-        ewmaBrier: 0.25,
-        recent: []
+        recent: [],
+        ewmaBrier: 0.25
     };
 }
 
-function normalizeExpertState(raw = {}) {
-    return {
-        predictions: Number(raw.predictions) || 0,
-        wins: Number(raw.wins) || 0,
-        losses: Number(raw.losses) || 0,
-        ewmaAccuracy: clamp(raw.ewmaAccuracy ?? 0.5, 0, 1),
-        ewmaBrier: clamp(raw.ewmaBrier ?? 0.25, 0, 1),
-        recent: Array.isArray(raw.recent) ? raw.recent.slice(-20).map(Number) : []
-    };
-}
-
-const EXPERTS = [
-    { id: 'baseline', name: 'Mốc ổn định theo bàn', baseWeight: 0.64 },
-    { id: 'recent', name: 'Xu hướng gần', baseWeight: 0.09 },
-    { id: 'markov', name: 'Điều kiện Markov', baseWeight: 0.09 },
-    { id: 'switch', name: 'Nhịp đổi bên', baseWeight: 0.06 },
-    { id: 'suffix', name: 'Lặp hậu tố', baseWeight: 0.08 },
-    { id: 'run', name: 'Độ dài nhịp', baseWeight: 0.04 }
-];
-
-function baselineExpert(board, symbols) {
-    const last = symbols[symbols.length - 1] || 'T';
-    if (board === 'md5') {
-        return {
-            id: 'baseline',
-            probabilityT: last === 'T' ? 0.522 : 0.478,
-            evidence: 1,
-            samples: symbols.length,
-            detail: 'Mốc MD5 ưu tiên khả năng tiếp tục phía của phiên gần nhất.'
-        };
-    }
-    if (board === 'xanh') {
-        return {
-            id: 'baseline',
-            probabilityT: 0.518,
-            evidence: 1,
-            samples: symbols.length,
-            detail: 'Mốc Bàn Hũ dùng thiên lệch Tài rất nhẹ, được hiệu chuẩn từ dữ liệu mẫu.'
-        };
-    }
-    const recent = symbols.slice(-12);
-    const probabilityT = betaMean(recent.filter(symbol => symbol === 'T').length, recent.length, 8);
-    return {
-        id: 'baseline', probabilityT, evidence: 1, samples: recent.length,
-        detail: 'Mốc chung dùng tỷ lệ Tài/Xỉu đã làm trơn.'
-    };
-}
-
-function smoothedRecentProbability(symbols, window) {
-    const recent = symbols.slice(-window);
-    const successes = recent.filter(symbol => symbol === 'T').length;
-    const probabilityT = betaMean(successes, recent.length, 3);
-    return {
-        probabilityT,
-        evidence: Math.min(1, recent.length / window),
-        samples: recent.length,
-        detail: `Tỷ lệ Tài trong ${recent.length} phiên gần nhất.`
-    };
-}
-
-function recentExpert(symbols) {
-    const estimates = [6, 10, 20]
-        .filter(window => symbols.length >= Math.min(6, window))
-        .map(window => ({ window, ...smoothedRecentProbability(symbols, window) }));
-    if (!estimates.length) return null;
-    let numerator = 0;
-    let denominator = 0;
-    for (const estimate of estimates) {
-        const weight = estimate.window === 6 ? 0.42 : estimate.window === 10 ? 0.34 : 0.24;
-        numerator += estimate.probabilityT * weight;
-        denominator += weight;
-    }
-    return {
-        id: 'recent',
-        probabilityT: numerator / denominator,
-        evidence: estimates.reduce((sum, item) => sum + item.evidence, 0) / estimates.length,
-        samples: Math.max(...estimates.map(item => item.samples)),
-        detail: 'Kết hợp tỷ lệ Tài/Xỉu ở cửa sổ 6, 10 và 20 phiên.'
-    };
-}
-
-function markovOrder(symbols, order) {
-    if (symbols.length <= order) return null;
-    const suffix = symbols.slice(-order).join('');
-    let tWeight = 0;
-    let xWeight = 0;
-    let samples = 0;
-    const start = Math.max(order, symbols.length - 20);
-    for (let index = start; index < symbols.length; index += 1) {
-        if (symbols.slice(index - order, index).join('') !== suffix) continue;
-        const age = symbols.length - 1 - index;
-        const weight = 0.5 ** (age / 8);
-        if (symbols[index] === 'T') tWeight += weight;
-        else xWeight += weight;
-        samples += 1;
-    }
-    const effective = tWeight + xWeight;
-    if (!samples || effective <= 0) return null;
-    return {
-        order,
-        probabilityT: (tWeight + 2.5) / (effective + 5),
-        samples,
-        evidence: Math.min(1, effective / 5)
-    };
-}
-
-function markovExpert(symbols) {
-    const orders = [1, 2, 3].map(order => markovOrder(symbols, order)).filter(Boolean);
-    if (!orders.length) return null;
-    let numerator = 0;
-    let denominator = 0;
-    for (const item of orders) {
-        const weight = item.evidence * (item.order === 1 ? 0.8 : item.order === 2 ? 1 : 1.08);
-        numerator += item.probabilityT * weight;
-        denominator += weight;
-    }
-    return {
-        id: 'markov',
-        probabilityT: denominator ? numerator / denominator : 0.5,
-        evidence: orders.reduce((sum, item) => sum + item.evidence, 0) / orders.length,
-        samples: orders.reduce((sum, item) => sum + item.samples, 0),
-        detail: `Markov bậc ${orders.map(item => item.order).join(', ')} trong vùng dữ liệu gần.`
-    };
-}
-
-function switchEstimate(symbols, window) {
-    const recent = symbols.slice(-window);
-    if (recent.length < 3) return null;
-    let switches = 0;
-    for (let index = 1; index < recent.length; index += 1) {
-        if (recent[index] !== recent[index - 1]) switches += 1;
-    }
-    const trials = recent.length - 1;
-    const probabilitySwitch = betaMean(switches, trials, 3);
-    const last = recent[recent.length - 1];
-    const probabilityT = last === 'T' ? 1 - probabilitySwitch : probabilitySwitch;
-    return {
-        probabilityT,
-        evidence: Math.min(1, trials / Math.max(5, window - 1)),
-        samples: trials
-    };
-}
-
-function switchExpert(symbols) {
-    const estimates = [6, 10, 20].map(window => switchEstimate(symbols, window)).filter(Boolean);
-    if (!estimates.length) return null;
-    const weights = [0.46, 0.34, 0.2];
-    let numerator = 0;
-    let denominator = 0;
-    for (let index = 0; index < estimates.length; index += 1) {
-        const weight = weights[index] * estimates[index].evidence;
-        numerator += estimates[index].probabilityT * weight;
-        denominator += weight;
-    }
-    return {
-        id: 'switch',
-        probabilityT: denominator ? numerator / denominator : 0.5,
-        evidence: estimates.reduce((sum, item) => sum + item.evidence, 0) / estimates.length,
-        samples: Math.max(...estimates.map(item => item.samples)),
-        detail: 'Đo nhịp tiếp tục hoặc đổi bên ở nhiều cửa sổ ngắn.'
-    };
-}
-
-function suffixEstimate(symbols, length) {
-    if (symbols.length <= length) return null;
-    const suffix = symbols.slice(-length).join('');
-    let tWeight = 0;
-    let xWeight = 0;
-    let samples = 0;
-    const start = Math.max(length, symbols.length - 40);
-    for (let index = start; index < symbols.length; index += 1) {
-        if (symbols.slice(index - length, index).join('') !== suffix) continue;
-        const age = symbols.length - 1 - index;
-        const weight = 0.5 ** (age / 14);
-        if (symbols[index] === 'T') tWeight += weight;
-        else xWeight += weight;
-        samples += 1;
-    }
-    const effective = tWeight + xWeight;
-    if (!samples || effective <= 0) return null;
-    return {
-        length,
-        probabilityT: (tWeight + 3) / (effective + 6),
-        evidence: Math.min(1, effective / 4),
-        samples
-    };
-}
-
-function suffixExpert(symbols) {
-    const estimates = [2, 3, 4].map(length => suffixEstimate(symbols, length)).filter(Boolean);
-    if (!estimates.length) return null;
-    let numerator = 0;
-    let denominator = 0;
-    for (const item of estimates) {
-        const weight = item.evidence * (item.length === 2 ? 0.85 : item.length === 3 ? 1 : 1.05);
-        numerator += item.probabilityT * weight;
-        denominator += weight;
-    }
-    return {
-        id: 'suffix',
-        probabilityT: denominator ? numerator / denominator : 0.5,
-        evidence: estimates.reduce((sum, item) => sum + item.evidence, 0) / estimates.length,
-        samples: estimates.reduce((sum, item) => sum + item.samples, 0),
-        detail: `So sánh hậu tố độ dài ${estimates.map(item => item.length).join(', ')}.`
-    };
-}
-
-function runExpert(symbols) {
-    if (symbols.length < 6) return null;
-    const runs = buildRuns(symbols);
-    const current = runs[runs.length - 1];
-    const bucket = Math.min(current.length, 4);
-    let continuations = 0;
-    let samples = 0;
-
-    for (let index = 1; index < symbols.length; index += 1) {
-        let runLength = 1;
-        for (let cursor = index - 2; cursor >= 0 && symbols[cursor] === symbols[index - 1]; cursor -= 1) {
-            runLength += 1;
-        }
-        if (Math.min(runLength, 4) !== bucket) continue;
-        samples += 1;
-        if (symbols[index] === symbols[index - 1]) continuations += 1;
-    }
-
-    if (!samples) {
-        const baseContinue = current.length >= 4 ? 0.43 : 0.5;
-        const probabilityT = current.symbol === 'T' ? baseContinue : 1 - baseContinue;
-        return {
-            id: 'run', probabilityT, evidence: 0.2, samples: 0,
-            detail: `Nhịp hiện tại ${current.symbol}-${current.length}, thiếu mẫu tương đồng.`
-        };
-    }
-    const probabilityContinue = betaMean(continuations, samples, 3);
-    return {
-        id: 'run',
-        probabilityT: current.symbol === 'T' ? probabilityContinue : 1 - probabilityContinue,
-        evidence: Math.min(1, samples / 5),
-        samples,
-        detail: `Ước lượng khả năng tiếp tục nhịp ${current.symbol}-${current.length}.`
-    };
-}
-
-function detectRegime(symbols) {
-    const recent = symbols.slice(-6);
-    const previous = symbols.slice(-12, -6);
-    const runs = buildRuns(symbols.slice(-20));
-    const currentRun = runs[runs.length - 1] || { symbol: null, length: 0 };
-    const recentRatio = ratioT(recent);
-    const previousRatio = previous.length ? ratioT(previous) : recentRatio;
-    const recentSwitch = switchRate(recent);
-    const previousSwitch = previous.length ? switchRate(previous) : recentSwitch;
-    const changeScore = clamp(Math.abs(recentRatio - previousRatio) * 0.58 + Math.abs(recentSwitch - previousSwitch) * 0.42, 0, 1);
-
-    let type = 'HỖN_HỢP';
-    if (currentRun.length >= 4) type = `BỆT_${currentRun.symbol}`;
-    else if (recentSwitch >= 0.72) type = 'ĐẢO_NHỊP';
-    else if (recentSwitch <= 0.28) type = 'THEO_NHỊP';
-    else if (changeScore >= 0.48) type = 'ĐỔI_CHẾ_ĐỘ';
-
-    return {
-        type,
-        changeScore: round(changeScore),
-        recentRatioT: round(recentRatio),
-        previousRatioT: round(previousRatio),
-        recentSwitchRate: round(recentSwitch),
-        previousSwitchRate: round(previousSwitch),
-        currentRun
-    };
-}
-
-class AdaptiveSelectiveEngineV7 {
+class RegimeMarkovGuardEngineV8 {
     constructor(options = {}) {
-        this.minHistory = Math.max(8, Number(options.minHistory) || 12);
-        this.maxEngineHistory = Math.max(12, Number(options.maxEngineHistory) || 20);
+        this.minHistory = Math.max(16, Number(options.minHistory) || 20);
+        this.maxEngineHistory = Math.max(40, Number(options.maxEngineHistory) || 240);
         this.maxRuntimeHistory = Math.max(this.maxEngineHistory, Number(options.maxRuntimeHistory) || 10000);
-        this.predictEdge = clamp(options.predictEdge ?? 0.014, 0.005, 0.12);
-        this.minConsensus = clamp(options.minConsensus ?? 0.56, 0.5, 0.9);
-        this.modelVersion = String(options.modelVersion || MODEL_VERSION);
         this.board = String(options.board || 'generic').toLowerCase();
+        this.modelVersion = String(options.modelVersion || MODEL_VERSION);
         this.history = [];
         this.pendingPrediction = null;
         this.pendingEvaluation = null;
@@ -396,34 +336,31 @@ class AdaptiveSelectiveEngineV7 {
         return this.history.slice(-limit).map(item => item.Symbol);
     }
 
-    expertMultiplier(id) {
-        if (id === 'baseline') return 1;
-        const stat = normalizeExpertState(this.expertPerformance[id]);
-        if (stat.predictions < 20) return 0.22;
-        const recentRate = stat.recent.length
-            ? stat.recent.reduce((sum, value) => sum + value, 0) / stat.recent.length
-            : 0.5;
-        const accuracySignal = clamp((recentRate - 0.5) / 0.1, -1, 1);
-        const brierSignal = clamp((0.25 - stat.ewmaBrier) / 0.06, -1, 1);
-        if (recentRate < 0.52 && stat.ewmaBrier >= 0.248) return 0.18;
-        return clamp(0.35 + accuracySignal * 0.35 + brierSignal * 0.2, 0.18, 1.05);
+    expertRecentAccuracy(id) {
+        const recent = this.expertPerformance[id]?.recent || [];
+        if (!recent.length) return 0.5;
+        return recent.reduce((sum, value) => sum + value, 0) / recent.length;
+    }
+
+    expertTrusted(id) {
+        const state = this.expertPerformance[id] || defaultExpertState();
+        return state.predictions >= 30 && state.recent.length >= 30 && this.expertRecentAccuracy(id) >= 0.60 && state.ewmaBrier <= 0.255;
     }
 
     updateExpertPerformance(actualSymbol) {
         if (!this.pendingEvaluation?.signals) return;
         for (const signal of this.pendingEvaluation.signals) {
-            const stat = normalizeExpertState(this.expertPerformance[signal.id]);
-            const actual = actualSymbol === 'T' ? 1 : 0;
+            const state = this.expertPerformance[signal.id] || defaultExpertState();
             const won = signal.symbol === actualSymbol;
+            const actual = actualSymbol === 'T' ? 1 : 0;
             const brier = (signal.probabilityT - actual) ** 2;
-            stat.predictions += 1;
-            if (won) stat.wins += 1;
-            else stat.losses += 1;
-            stat.ewmaAccuracy = stat.ewmaAccuracy * 0.9 + (won ? 1 : 0) * 0.1;
-            stat.ewmaBrier = stat.ewmaBrier * 0.9 + brier * 0.1;
-            stat.recent.push(won ? 1 : 0);
-            if (stat.recent.length > 20) stat.recent.shift();
-            this.expertPerformance[signal.id] = stat;
+            state.predictions += 1;
+            if (won) state.wins += 1;
+            else state.losses += 1;
+            state.recent.push(won ? 1 : 0);
+            if (state.recent.length > 40) state.recent.shift();
+            state.ewmaBrier = state.ewmaBrier * 0.92 + brier * 0.08;
+            this.expertPerformance[signal.id] = state;
         }
         this.pendingEvaluation = null;
     }
@@ -441,12 +378,15 @@ class AdaptiveSelectiveEngineV7 {
             this.stats.Chuoi_thang_dai_nhat = Math.max(this.stats.Chuoi_thang_dai_nhat, this.stats.Chuoi_hien_tai.So_luong);
         } else {
             this.stats.Thua += 1;
-            this.consecutiveLosses += 1;
             this.consecutiveWins = 0;
+            this.consecutiveLosses += 1;
             if (this.stats.Chuoi_hien_tai.Loai === 'THUA') this.stats.Chuoi_hien_tai.So_luong += 1;
             else this.stats.Chuoi_hien_tai = { Loai: 'THUA', So_luong: 1 };
             this.stats.Chuoi_thua_dai_nhat = Math.max(this.stats.Chuoi_thua_dai_nhat, this.stats.Chuoi_hien_tai.So_luong);
-            if (this.consecutiveLosses >= 3) this.cooldownRounds = Math.max(this.cooldownRounds, 1);
+            if (this.consecutiveLosses >= 3) {
+                this.cooldownRounds = 1;
+                this.consecutiveLosses = 2;
+            }
         }
         const settled = {
             Du_doan: this.pendingPrediction.prediction,
@@ -459,15 +399,33 @@ class AdaptiveSelectiveEngineV7 {
         return settled;
     }
 
-    buildSignals(symbols) {
-        return [
-            baselineExpert(this.board, symbols),
-            recentExpert(symbols),
-            markovExpert(symbols),
-            switchExpert(symbols),
-            suffixExpert(symbols),
-            runExpert(symbols)
-        ].filter(Boolean);
+    baselineSignal(symbols) {
+        const last = symbols[symbols.length - 1] || 'T';
+        if (this.board === 'md5') {
+            return {
+                symbol: last,
+                probabilityT: last === 'T' ? 0.524 : 0.476,
+                detail: 'Mốc MD5 ưu tiên tiếp tục cửa gần nhất; các mô hình cầu chỉ được phép phản biện khi đã tự chứng minh ổn định.'
+            };
+        }
+        if (this.board === 'xanh') {
+            return {
+                symbol: 'T',
+                probabilityT: 0.518,
+                detail: 'Mốc Bàn Hũ giữ thiên lệch Tài rất nhẹ; Markov và loại cầu đóng vai trò bộ lọc.'
+            };
+        }
+        const recent = symbols.slice(-20);
+        const probabilityT = betaMean(recent.filter(symbol => symbol === 'T').length, recent.length, 8);
+        return {
+            symbol: probabilityT >= 0.5 ? 'T' : 'X',
+            probabilityT,
+            detail: 'Mốc chung dùng tỷ lệ đã làm trơn.'
+        };
+    }
+
+    buildSignals(symbols, regime) {
+        return [markovExpert(symbols), suffixExpert(symbols), regimeExpert(symbols, regime)].filter(Boolean);
     }
 
     makeDecision() {
@@ -483,13 +441,9 @@ class AdaptiveSelectiveEngineV7 {
                 prediction: null,
                 confidence: null,
                 probabilityT: 0.5,
-                pattern: { type: regime.type, description: 'Đang nạp dữ liệu runtime mới.' },
+                pattern: { type: regime.type, description: `Đang nạp ${symbols.length}/${this.minHistory} phiên để đọc cầu và Markov.` },
                 reasons: [],
-                loading: {
-                    Da_nap: symbols.length,
-                    Can_toi_thieu: this.minHistory,
-                    Con_thieu: Math.max(0, this.minHistory - symbols.length)
-                },
+                loading: { Da_nap: symbols.length, Can_toi_thieu: this.minHistory, Con_thieu: Math.max(0, this.minHistory - symbols.length) },
                 regime,
                 modelVersion: this.modelVersion
             };
@@ -497,151 +451,87 @@ class AdaptiveSelectiveEngineV7 {
             return decision;
         }
 
-        const signals = this.buildSignals(symbols);
-        const baseById = Object.fromEntries(EXPERTS.map(expert => [expert.id, expert]));
-        const ranked = [];
+        const baseline = this.baselineSignal(symbols);
+        const signals = this.buildSignals(symbols, regime);
+        const rows = signals.map(signal => {
+            const symbol = signal.probabilityT >= 0.5 ? 'T' : 'X';
+            return {
+                ...signal,
+                probabilityT: round(clamp(signal.probabilityT, 0.42, 0.58)),
+                symbol,
+                side: toResult(symbol),
+                recentAccuracy: round(this.expertRecentAccuracy(signal.id)),
+                trusted: this.expertTrusted(signal.id)
+            };
+        });
 
-        for (const signal of signals) {
-            const probabilityT = clamp(signal.probabilityT, 0.38, 0.62);
-            const expert = baseById[signal.id];
-            const stat = normalizeExpertState(this.expertPerformance[signal.id]);
-            const recentRate = stat.recent.length
-                ? stat.recent.reduce((sum, value) => sum + value, 0) / stat.recent.length
-                : 0.5;
-            const performanceMultiplier = this.expertMultiplier(signal.id);
-            const evidenceFactor = signal.id === 'baseline'
-                ? 1
-                : clamp(0.25 + signal.evidence * 0.75, 0.25, 1);
-            const weight = expert.baseWeight * performanceMultiplier * evidenceFactor;
-            ranked.push({
-                id: signal.id,
-                name: expert.name,
-                probabilityT: round(probabilityT),
-                side: toResult(probabilityT >= 0.5 ? 'T' : 'X'),
-                weight: round(weight),
-                evidence: round(signal.evidence),
-                samples: signal.samples,
-                predictions: stat.predictions,
-                recentAccuracy: round(recentRate),
-                ewmaBrier: round(stat.ewmaBrier),
-                reason: signal.detail
-            });
-        }
+        this.pendingEvaluation = {
+            targetSession: lastSession + 1,
+            signals: rows.map(row => ({ id: row.id, symbol: row.symbol, probabilityT: row.probabilityT }))
+        };
 
-        const baseline = ranked.find(item => item.id === 'baseline');
-        const baselineProbabilityT = baseline?.probabilityT ?? 0.5;
-        const baselineSymbol = baselineProbabilityT >= 0.5 ? 'T' : 'X';
-        const trusted = ranked.filter(item =>
-            item.id !== 'baseline' &&
-            item.predictions >= 20 &&
-            item.recentAccuracy >= 0.55 &&
-            item.ewmaBrier <= 0.255 &&
-            item.evidence >= 0.42
-        );
-
-        let adaptiveProbabilityT = 0.5;
-        let adaptiveWeight = 0;
-        for (const item of trusted) {
-            adaptiveProbabilityT += (item.probabilityT - 0.5) * item.weight;
-            adaptiveWeight += item.weight;
-        }
-        if (adaptiveWeight > 0) {
-            adaptiveProbabilityT = 0.5 + (adaptiveProbabilityT - 0.5) / adaptiveWeight;
-        }
-
-        const adaptiveSymbol = adaptiveProbabilityT >= 0.5 ? 'T' : 'X';
-        const oppositeTrusted = trusted.filter(item => toSymbol(item.side) !== baselineSymbol);
-        let adaptiveTrust = Math.min(0.32, adaptiveWeight * 0.9);
-        if (adaptiveSymbol !== baselineSymbol && oppositeTrusted.length < 2) adaptiveTrust = Math.min(adaptiveTrust, 0.06);
-        if (!trusted.length) adaptiveTrust = 0;
-
-        let rawProbabilityT = baselineProbabilityT * (1 - adaptiveTrust) + adaptiveProbabilityT * adaptiveTrust;
-        const regimePenalty = clamp(1 - regime.changeScore * 0.12, 0.86, 1);
-        const lossPenalty = this.consecutiveLosses >= 2 ? 0.92 : 1;
-        const calibrationShrink = regimePenalty * lossPenalty;
-        let probabilityT = 0.5 + (rawProbabilityT - 0.5) * calibrationShrink;
-        probabilityT = clamp(probabilityT, 0.455, 0.545);
-
-        const chosenSymbol = probabilityT >= 0.5 ? 'T' : 'X';
-        const totalDirectionalWeight = ranked.reduce((sum, item) => sum + item.weight, 0);
-        const agreeingWeight = ranked
-            .filter(item => toSymbol(item.side) === chosenSymbol)
-            .reduce((sum, item) => sum + item.weight, 0);
-        const consensus = totalDirectionalWeight ? agreeingWeight / totalDirectionalWeight : 0.5;
-        const edge = Math.abs(probabilityT - 0.5);
-        let requiredEdge = this.predictEdge;
-        if (regime.changeScore >= 0.68) requiredEdge += 0.004;
-        if (this.consecutiveLosses >= 2) requiredEdge += 0.002;
-
+        const trusted = rows.filter(row => row.trusted);
+        const opposing = trusted.filter(row => row.symbol !== baseline.symbol);
+        const agreeing = trusted.filter(row => row.symbol === baseline.symbol);
         let action = 'PREDICT';
         let skipReason = null;
+
         if (this.cooldownRounds > 0) {
             action = 'SKIP';
-            skipReason = 'Tạm nghỉ một phiên sau chuỗi thua liên tiếp.';
+            skipReason = 'Nghỉ một phiên sau chuỗi thua 3 lần để tránh bám sai cầu.';
             this.cooldownRounds -= 1;
-            this.consecutiveLosses = Math.min(this.consecutiveLosses, 2);
-        } else if (edge < requiredEdge) {
+        } else if (opposing.length === 3 && agreeing.length === 0) {
             action = 'SKIP';
-            skipReason = 'Biên xác suất quá nhỏ.';
-        } else if (regime.changeScore >= 0.78 && consensus < 0.54) {
+            skipReason = 'Markov, lặp chuỗi và máy đọc cầu đều phản đối mốc chính; bỏ qua thay vì đoán ép.';
+        } else if (regime.changeScore >= 0.65 && opposing.length >= 2) {
             action = 'SKIP';
-            skipReason = 'Chế độ vừa thay đổi và các tín hiệu đang phân tán.';
+            skipReason = 'Cầu đang đổi chế độ và nhiều mô hình phản đối; tạm đứng ngoài.';
         }
 
-        const confidence = action === 'PREDICT'
-            ? Math.round(clamp(Math.max(probabilityT, 1 - probabilityT) * 100, 51, 57))
-            : null;
+        const supportiveStrength = agreeing.reduce((sum, row) => sum + Math.abs(row.probabilityT - 0.5), 0);
+        const opposingStrength = opposing.reduce((sum, row) => sum + Math.abs(row.probabilityT - 0.5), 0);
+        const baseEdge = Math.abs(baseline.probabilityT - 0.5);
+        const displayedEdge = clamp(baseEdge + supportiveStrength * 0.15 - opposingStrength * 0.1, 0.01, 0.06);
+        const probabilityT = baseline.symbol === 'T' ? 0.5 + displayedEdge : 0.5 - displayedEdge;
+        const confidence = action === 'PREDICT' ? Math.round(clamp(50 + displayedEdge * 100, 51, 56)) : null;
 
-        ranked.sort((a, b) => b.weight - a.weight);
+        const ranked = rows.slice().sort((a, b) => {
+            if (a.trusted !== b.trusted) return a.trusted ? -1 : 1;
+            return Math.abs(b.probabilityT - 0.5) - Math.abs(a.probabilityT - 0.5);
+        });
+        const description = skipReason || `${regime.description} Mốc chính: ${toResult(baseline.symbol)}; chuyên gia được tin cậy: ${trusted.length}/3.`;
         const decision = {
             action,
             targetSession: lastSession + 1,
-            prediction: action === 'PREDICT' ? toResult(chosenSymbol) : null,
-            symbol: action === 'PREDICT' ? chosenSymbol : null,
+            prediction: action === 'PREDICT' ? toResult(baseline.symbol) : null,
+            symbol: action === 'PREDICT' ? baseline.symbol : null,
             confidence,
             probabilityT: round(probabilityT),
             probabilityX: round(1 - probabilityT),
-            rawProbabilityT: round(rawProbabilityT),
-            pattern: {
-                type: regime.type,
-                description: skipReason || `Đồng thuận ${Math.round(consensus * 100)}%, biên ${round(edge * 100, 2)}%.`
-            },
-            reasons: ranked.slice(0, 3).map(item => item.reason),
+            pattern: { type: regime.type, description },
+            reasons: [baseline.detail, ...ranked.slice(0, 2).map(row => row.detail)],
             regime,
             analysis: {
+                architecture: 'Mốc bảo thủ + đọc loại cầu + Markov 1-4 + lặp hậu tố + bộ lọc chuỗi thua',
                 runtimeHistory: this.history.length,
                 engineWindow: symbols.length,
-                edge: round(edge),
-                requiredEdge: round(requiredEdge),
-                consensus: round(consensus),
-                regimePenalty: round(regimePenalty),
-                calibrationShrink: round(calibrationShrink),
-                baselineProbabilityT: round(baselineProbabilityT),
-                trustedExperts: trusted.map(item => item.id),
-                adaptiveTrust: round(adaptiveTrust),
+                baseline: { side: toResult(baseline.symbol), probabilityT: round(baseline.probabilityT) },
+                trustedExperts: trusted.map(row => row.id),
+                opposingTrustedExperts: opposing.map(row => row.id),
                 consecutiveWins: this.consecutiveWins,
                 consecutiveLosses: this.consecutiveLosses,
                 skipReason
             },
-            topModels: ranked.filter(item => toSymbol(item.side) === chosenSymbol).slice(0, 3),
-            opposingModels: ranked.filter(item => toSymbol(item.side) !== chosenSymbol).slice(0, 3),
-            componentCount: { primary: signals.length, total: signals.length },
+            topModels: ranked.filter(row => row.symbol === baseline.symbol).slice(0, 3),
+            opposingModels: ranked.filter(row => row.symbol !== baseline.symbol).slice(0, 3),
+            componentCount: { primary: 4, total: 4 },
             modelVersion: this.modelVersion
-        };
-
-        this.pendingEvaluation = {
-            targetSession: decision.targetSession,
-            signals: ranked.map(item => ({
-                id: item.id,
-                symbol: toSymbol(item.side),
-                probabilityT: item.probabilityT
-            }))
         };
 
         if (action === 'PREDICT') {
             this.pendingPrediction = {
                 targetSession: decision.targetSession,
-                symbol: chosenSymbol,
+                symbol: baseline.symbol,
                 prediction: decision.prediction,
                 confidence,
                 regime: regime.type,
@@ -651,7 +541,6 @@ class AdaptiveSelectiveEngineV7 {
             this.stats.Bo_qua += 1;
             this.pendingPrediction = null;
         }
-
         this.lastDecision = decision;
         return decision;
     }
@@ -659,14 +548,9 @@ class AdaptiveSelectiveEngineV7 {
     addResult(input) {
         const session = Number(input?.Phien);
         const symbol = toSymbol(input?.Ket_qua);
-        if (!Number.isSafeInteger(session) || !symbol) {
-            return { accepted: false, reason: 'INVALID_RESULT' };
-        }
-
+        if (!Number.isSafeInteger(session) || !symbol) return { accepted: false, reason: 'INVALID_RESULT' };
         const last = this.history[this.history.length - 1];
-        if (last && session <= last.Phien) {
-            return { accepted: false, reason: session === last.Phien ? 'DUPLICATE' : 'OLD_SESSION' };
-        }
+        if (last && session <= last.Phien) return { accepted: false, reason: session === last.Phien ? 'DUPLICATE' : 'OLD_SESSION' };
 
         let gap = null;
         if (last && session > last.Phien + 1) {
@@ -695,10 +579,7 @@ class AdaptiveSelectiveEngineV7 {
         if (settled) Object.assign(record, settled);
         this.stats.Tong_phien += 1;
         this.history.push(record);
-        if (this.history.length > this.maxRuntimeHistory) {
-            this.history.splice(0, this.history.length - this.maxRuntimeHistory);
-        }
-
+        if (this.history.length > this.maxRuntimeHistory) this.history.splice(0, this.history.length - this.maxRuntimeHistory);
         const decision = this.makeDecision();
         return { accepted: true, gap, settled, decision };
     }
@@ -730,19 +611,18 @@ class AdaptiveSelectiveEngineV7 {
 
     getPerformanceSummary() {
         return EXPERTS.map(expert => {
-            const stat = normalizeExpertState(this.expertPerformance[expert.id]);
-            const recentWins = stat.recent.reduce((sum, value) => sum + value, 0);
-            const recentAccuracy = stat.recent.length ? recentWins / stat.recent.length : 0.5;
+            const state = this.expertPerformance[expert.id] || defaultExpertState();
+            const recentAccuracy = this.expertRecentAccuracy(expert.id);
             return {
                 id: expert.id,
                 name: expert.name,
-                predictions: stat.predictions,
-                wins: stat.wins,
-                losses: stat.losses,
-                accuracy: stat.predictions ? `${round((stat.wins / stat.predictions) * 100, 2)}%` : '0%',
+                predictions: state.predictions,
+                wins: state.wins,
+                losses: state.losses,
+                accuracy: state.predictions ? `${round((state.wins / state.predictions) * 100, 2)}%` : '0%',
                 recentAccuracy: `${round(recentAccuracy * 100, 2)}%`,
-                ewmaBrier: round(stat.ewmaBrier),
-                weightMultiplier: round(this.expertMultiplier(expert.id))
+                ewmaBrier: round(state.ewmaBrier),
+                trusted: this.expertTrusted(expert.id)
             };
         });
     }
@@ -752,13 +632,10 @@ class AdaptiveSelectiveEngineV7 {
         return {
             engine: ENGINE_NAME,
             modelVersion: this.modelVersion,
+            board: this.board,
             runtimeHistorySize: this.history.length,
             engineWindowSize: symbols.length,
-            configuredEngineWindow: this.maxEngineHistory,
-            maxRuntimeHistory: this.maxRuntimeHistory,
             minHistory: this.minHistory,
-            predictEdge: this.predictEdge,
-            minConsensus: this.minConsensus,
             regime: detectRegime(symbols),
             stats: this.getPublicStats(),
             expertPerformance: this.getPerformanceSummary(),
@@ -767,7 +644,11 @@ class AdaptiveSelectiveEngineV7 {
     }
 }
 
+// Alias retained so the existing server/backtest scripts remain compatible.
+const AdaptiveSelectiveEngineV7 = RegimeMarkovGuardEngineV8;
+
 module.exports = {
+    RegimeMarkovGuardEngineV8,
     AdaptiveSelectiveEngineV7,
     MODEL_VERSION,
     ENGINE_NAME,

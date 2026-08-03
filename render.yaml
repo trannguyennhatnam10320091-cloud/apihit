@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hit-api-v7-runtime
+    name: hit-api-v8-regime-markov
     runtime: node
     plan: free
     buildCommand: npm install
@@ -9,13 +9,13 @@ services:
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: 240
       - key: POLL_INTERVAL
         value: 1500
       - key: REQUEST_TIMEOUT
         value: 8000
       - key: MIN_HISTORY
-        value: 12
+        value: 20
       - key: MAX_ENGINE_HISTORY
         value: 20
       - key: MAX_RUNTIME_HISTORY

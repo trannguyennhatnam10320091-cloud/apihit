@@ -1,0 +1,22 @@
+BACKTEST V8 — hitclub-history-all-2026-08-03.csv
+
+MD5
+- 1.272 phiên
+- 1.137 dự đoán, độ phủ 90,81%
+- Toàn bộ: 51,98%
+- Test 20% cuối: 234/255 dự đoán, đúng 53,42%
+
+BÀN HŨ
+- 1.146 phiên
+- 1.004 dự đoán, độ phủ 89,17%
+- Toàn bộ: 51,69%
+- Test 20% cuối: 210/230 dự đoán, đúng 54,29%
+
+TỔNG
+- 2.418 phiên
+- 2.141 dự đoán
+- Độ phủ thô 88,54%
+- Toàn bộ: 51,84%
+- Test 20% cuối gộp: 239/444 = 53,83%
+
+Lưu ý: backtest không bảo đảm kết quả tương lai.

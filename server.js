@@ -6,14 +6,14 @@ const { URL } = require('url');
 const { AdaptiveSelectiveEngineV7, MODEL_VERSION, ENGINE_NAME } = require('./predictor');
 const { parseLimit, percent, compactApi, historyApi, cauApi } = require('./compact-api');
 
-const API_VERSION = '7.2.0-RUNTIME-BOT-READY';
-const API_BUILD = '2026-08-03-V720-RUNTIME-BOT-READY';
+const API_VERSION = '8.0.0-REGIME-MARKOV-GUARD';
+const API_BUILD = '2026-08-03-V800-REGIME-MARKOV-GUARD';
 const HOST = '0.0.0.0';
 const PORT = Number(process.env.PORT) || 3001;
 const POLL_INTERVAL = Math.max(700, Number(process.env.POLL_INTERVAL) || 1500);
 const REQUEST_TIMEOUT = Math.max(2000, Number(process.env.REQUEST_TIMEOUT) || 8000);
-const MIN_HISTORY = Math.max(8, Number(process.env.MIN_HISTORY) || 12);
-const MAX_ENGINE_HISTORY = Math.max(12, Number(process.env.MAX_ENGINE_HISTORY) || 20);
+const MIN_HISTORY = Math.max(16, Number(process.env.MIN_HISTORY) || 20);
+const MAX_ENGINE_HISTORY = Math.max(40, Number(process.env.MAX_ENGINE_HISTORY) || 240);
 const MAX_RUNTIME_HISTORY = Math.max(MAX_ENGINE_HISTORY, Number(process.env.MAX_RUNTIME_HISTORY) || 10000);
 const PREDICT_EDGE = Number(process.env.PREDICT_EDGE) || 0.014;
 const MIN_CONSENSUS = Number(process.env.MIN_CONSENSUS) || 0.56;
@@ -166,7 +166,7 @@ function requestJson(url) {
     return new Promise((resolve, reject) => {
         const req = https.get(url, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 14) HIT-Adaptive-Runtime/7.0',
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 14) HIT-Regime-Markov-Guard/8.0',
                 Accept: 'application/json',
                 'Cache-Control': 'no-cache'
             }
