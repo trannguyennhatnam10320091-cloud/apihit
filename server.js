@@ -6,8 +6,8 @@ const { URL } = require('url');
 const { AdaptiveSelectiveEngineV7, MODEL_VERSION, ENGINE_NAME } = require('./predictor');
 const { parseLimit, percent, compactApi, historyApi, cauApi } = require('./compact-api');
 
-const API_VERSION = '7.1.0-RUNTIME-BOT-READY';
-const API_BUILD = '2026-08-03-V710-RUNTIME-BOT-READY';
+const API_VERSION = '7.2.0-RUNTIME-BOT-READY';
+const API_BUILD = '2026-08-03-V720-RUNTIME-BOT-READY';
 const HOST = '0.0.0.0';
 const PORT = Number(process.env.PORT) || 3001;
 const POLL_INTERVAL = Math.max(700, Number(process.env.POLL_INTERVAL) || 1500);
@@ -75,7 +75,8 @@ function createFeed(key, name, gid, mode) {
         stopped: false,
         lastSuccessAt: null,
         lastError: null,
-        requests: 0
+        requests: 0,
+        ignoreBeforeSid: null
     };
 }
 
@@ -213,6 +214,7 @@ function buildApi(result, decision, engine) {
 }
 
 async function handleResult(feed, result) {
+    if (feed.ignoreBeforeSid !== null && result.Phien <= feed.ignoreBeforeSid) return;
     const outcome = feed.engine.addResult(result);
     if (!outcome.accepted) return;
     if (outcome.gap) console.warn(`[CẢNH BÁO] [${feed.name}] Thiếu ${outcome.gap.missingCount} phiên.`);
@@ -287,23 +289,43 @@ function normalizeBoard(value) {
     return null;
 }
 
-function resetFeed(feed) {
-    feed.engine.resetAll();
-    feed.latestApi = emptyApi();
-    feed.pendingSid = null;
+function normalizeResetTarget(value) {
+    const target = String(value || 'all').toLowerCase();
+    if (['stats', 'stat', 'statistics', 'thong-ke', 'thống-kê'].includes(target)) return 'stats';
+    if (['history', 'cau', 'history-cau', 'lich-su', 'lịch-sử'].includes(target)) return 'history';
+    if (['all', 'both', 'everything'].includes(target)) return 'all';
+    return null;
+}
+
+function resetFeed(feed, target) {
+    if (target === 'stats' || target === 'all') {
+        feed.engine.resetStats();
+    }
+    if (target === 'history' || target === 'all') {
+        const latestSession = Number(feed.latestApi?.Phien);
+        feed.ignoreBeforeSid = Number.isSafeInteger(latestSession) ? latestSession : feed.ignoreBeforeSid;
+        feed.engine.clearHistory();
+        feed.latestApi = emptyApi();
+        feed.pendingSid = null;
+    }
     feed.lastError = null;
 }
 
-function resetBoards(board) {
-    if (board === 'xanh' || board === 'all') resetFeed(feeds.hit);
-    if (board === 'md5' || board === 'all') resetFeed(feeds.md5);
+function resetBoards(board, target) {
+    if (board === 'xanh' || board === 'all') resetFeed(feeds.hit, target);
+    if (board === 'md5' || board === 'all') resetFeed(feeds.md5, target);
+    const boardName = board === 'all' ? 'cả hai bàn' : board === 'xanh' ? 'Bàn Hũ' : 'Bàn MD5';
+    const message = target === 'stats'
+        ? `Đã đặt lại thống kê ${boardName}; lịch sử cầu được giữ nguyên.`
+        : target === 'history'
+            ? `Đã xóa lịch sử cầu ${boardName}; thống kê được giữ nguyên.`
+            : `Đã đặt lại lịch sử và thống kê ${boardName}.`;
     return {
         ok: true,
         board,
+        target,
         reset_at: new Date().toISOString(),
-        message: board === 'all'
-            ? 'Đã đặt lại lịch sử và thống kê của cả hai bàn.'
-            : `Đã đặt lại lịch sử và thống kê ${board === 'xanh' ? 'Bàn Hũ' : 'Bàn MD5'}.`
+        message
     };
 }
 
@@ -441,8 +463,10 @@ async function handleRequest(req, res) {
         if (req.method === 'POST' && pathname === '/api/admin/reset') {
             if (!requireAdmin(req, res)) return;
             const board = normalizeBoard(url.searchParams.get('board'));
+            const target = normalizeResetTarget(url.searchParams.get('target') || 'all');
             if (!board) return sendJson(res, 400, { ok: false, code: 'INVALID_BOARD', message: 'Bàn không hợp lệ.' });
-            return sendJson(res, 200, resetBoards(board));
+            if (!target) return sendJson(res, 400, { ok: false, code: 'INVALID_TARGET', message: 'Phần cần đặt lại không hợp lệ.' });
+            return sendJson(res, 200, resetBoards(board, target));
         }
 
         if (req.method === 'GET' && pathname === '/api/admin/export') {

@@ -1,0 +1,16 @@
+API 7.2
+
+Đã tách riêng:
+- Đặt lại thống kê: giữ nguyên lịch sử cầu.
+- Xóa lịch sử cầu: giữ nguyên thống kê.
+
+Cập nhật repo API đang dùng:
+1. Giải nén API2.zip.
+2. Tải các file trong thư mục API2 lên đúng ngoài cùng repo cũ và cho phép thay thế file trùng tên.
+3. Commit thay đổi.
+4. Render sẽ tự triển khai lại.
+
+Kiểm tra:
+https://hit-api-v7-runtime.onrender.com/health
+
+Kết quả cần có version 7.2.0-RUNTIME-BOT-READY.

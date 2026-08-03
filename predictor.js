@@ -372,16 +372,24 @@ class AdaptiveSelectiveEngineV7 {
         this.cooldownRounds = 0;
     }
 
-    resetAll() {
+    resetStats() {
+        this.stats = defaultStats();
+    }
+
+    clearHistory() {
         this.history = [];
         this.pendingPrediction = null;
         this.pendingEvaluation = null;
         this.lastDecision = null;
-        this.stats = defaultStats();
         this.expertPerformance = Object.fromEntries(EXPERTS.map(expert => [expert.id, defaultExpertState()]));
         this.consecutiveWins = 0;
         this.consecutiveLosses = 0;
         this.cooldownRounds = 0;
+    }
+
+    resetAll() {
+        this.clearHistory();
+        this.resetStats();
     }
 
     getSymbols(limit = this.maxEngineHistory) {
