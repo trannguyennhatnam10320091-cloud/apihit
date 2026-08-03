@@ -1,7 +1,11 @@
 'use strict';
 
 const assert = require('assert');
-const { AdaptiveSelectiveEngineV7, MODEL_VERSION } = require('../predictor');
+const {
+    AdaptiveSelectiveEngineV7,
+    MODEL_VERSION,
+    alternatingSuffixLength
+} = require('../predictor');
 
 function result(session, symbol) {
     const dice = symbol === 'T' ? [4, 4, 4] : [2, 2, 2];
@@ -15,22 +19,56 @@ function result(session, symbol) {
     };
 }
 
-const engine = new AdaptiveSelectiveEngineV7({ minHistory: 20, maxEngineHistory: 240 });
+assert.strictEqual(alternatingSuffixLength('TTTXT'.split('')), 3);
+assert.strictEqual(alternatingSuffixLength('XXXTX'.split('')), 3);
+assert.strictEqual(alternatingSuffixLength('TXTX'.split('')), 4);
+assert.strictEqual(alternatingSuffixLength('TTTT'.split('')), 1);
+
+const engine = new AdaptiveSelectiveEngineV7({ maxEngineHistory: 240 });
 assert.strictEqual(engine.modelVersion, MODEL_VERSION);
 
-const sequence = 'TTXXTXXTTXTTXXTTXTXXTTXXT'.split('');
-for (let index = 0; index < sequence.length; index += 1) {
-    const outcome = engine.addResult(result(1000 + index, sequence[index]));
-    assert.strictEqual(outcome.accepted, true);
-    assert.ok(['WAIT_DATA', 'PREDICT', 'SKIP'].includes(outcome.decision.action));
-}
+let out = engine.addResult(result(1000, 'T'));
+assert.strictEqual(out.decision.prediction, 'Tài');
+assert.strictEqual(out.decision.pattern.type, 'BÁM_PHIÊN_TRƯỚC');
 
-assert.strictEqual(engine.history.length, sequence.length);
-assert.ok(engine.getPublicHistory(10).length === 10);
-assert.ok(engine.getPerformanceSummary().length === 3);
-assert.ok(engine.getPublicStats().Tong_phien === sequence.length);
+out = engine.addResult(result(1001, 'T'));
+assert.strictEqual(out.settled.Thang_thua, 'THẮNG');
+assert.strictEqual(out.decision.prediction, 'Tài');
 
-const duplicate = engine.addResult(result(1000 + sequence.length - 1, 'T'));
+out = engine.addResult(result(1002, 'X'));
+assert.strictEqual(out.decision.pattern.type, 'BÁM_PHIÊN_TRƯỚC');
+assert.strictEqual(out.decision.prediction, 'Xỉu');
+
+// Hậu tố T-X-T xuất hiện: nhận cầu 1-1 ngay và chọn cửa đối diện T là X.
+out = engine.addResult(result(1003, 'T'));
+assert.strictEqual(out.decision.pattern.type, 'CẦU_1-1');
+assert.strictEqual(out.decision.prediction, 'Xỉu');
+assert.strictEqual(out.decision.analysis.alternatingSuffixLength, 3);
+
+// Cầu tiếp tục: giữ chế độ 1-1.
+out = engine.addResult(result(1004, 'X'));
+assert.strictEqual(out.settled.Thang_thua, 'THẮNG');
+assert.strictEqual(out.decision.pattern.type, 'CẦU_1-1');
+assert.strictEqual(out.decision.prediction, 'Tài');
+
+// Cầu gãy ngay: dự đoán T nhưng thực tế lại X, phải quay về bám X.
+out = engine.addResult(result(1005, 'X'));
+assert.strictEqual(out.settled.Thang_thua, 'THUA');
+assert.strictEqual(out.decision.pattern.type, 'BÁM_PHIÊN_TRƯỚC');
+assert.strictEqual(out.decision.prediction, 'Xỉu');
+
+// Mẫu đối xứng X-T-X cũng phải nhận, không phụ thuộc riêng T-X-T.
+out = engine.addResult(result(1006, 'T'));
+out = engine.addResult(result(1007, 'X'));
+assert.strictEqual(out.decision.pattern.type, 'CẦU_1-1');
+assert.strictEqual(out.decision.prediction, 'Tài');
+
+assert.strictEqual(engine.history.length, 8);
+assert.ok(engine.getPublicHistory(5).length === 5);
+assert.ok(engine.getPerformanceSummary().length === 1);
+assert.ok(engine.getPublicStats().Tong_phien === 8);
+
+const duplicate = engine.addResult(result(1007, 'T'));
 assert.strictEqual(duplicate.accepted, false);
 assert.strictEqual(duplicate.reason, 'DUPLICATE');
 
