@@ -1,0 +1,30 @@
+Backtest V9 Follow Previous + Fast 1-1: hitclub-history-all-2026-08-03.csv
+Tham số: {"minHistory":1,"maxEngineHistory":240,"maxRuntimeHistory":20000}
+
+[MD5]
+Phiên: 1272
+Dự đoán: 1271 | Bỏ qua: 0
+Độ phủ: 100.00%
+Đúng: 628 | Sai: 643
+Tỷ lệ đúng: 49.41%
+Chuỗi thắng dài nhất: 12 | Chuỗi thua dài nhất: 10
+  train-60%: dự đoán 762/763, độ phủ 99.87%, đúng 47.90%
+  validation-20%: dự đoán 254/254, độ phủ 100.00%, đúng 51.97%
+  test-20%: dự đoán 255/255, độ phủ 100.00%, đúng 51.37%
+
+[XANH]
+Phiên: 1146
+Dự đoán: 1145 | Bỏ qua: 0
+Độ phủ: 100.00%
+Đúng: 573 | Sai: 572
+Tỷ lệ đúng: 50.04%
+Chuỗi thắng dài nhất: 9 | Chuỗi thua dài nhất: 11
+  train-60%: dự đoán 686/687, độ phủ 99.85%, đúng 47.81%
+  validation-20%: dự đoán 229/229, độ phủ 100.00%, đúng 55.02%
+  test-20%: dự đoán 230/230, độ phủ 100.00%, đúng 51.74%
+
+[TỔNG]
+Phiên: 2418
+Dự đoán: 2416
+Độ phủ thô: 99.92%
+Tỷ lệ đúng: 49.71%

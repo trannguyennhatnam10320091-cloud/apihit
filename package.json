@@ -1,7 +1,7 @@
 {
-  "name": "hit-regime-markov-guard-api-v8",
-  "version": "8.0.0",
-  "description": "HIT API V8: đọc loại cầu, Markov 1-4, hậu tố và bộ lọc chuỗi thua.",
+  "name": "hit-follow-previous-fast-1-1-api-v9",
+  "version": "9.0.0",
+  "description": "HIT API V9: bám kết quả phiên trước và nhận cầu 1-1 nhanh từ T-X-T hoặc X-T-X.",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

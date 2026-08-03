@@ -1,53 +1,28 @@
-# Thiết kế thuật toán V7
+# THUẬT TOÁN V9 — BÁM PHIÊN TRƯỚC + CẦU 1-1 NHANH
 
-## Vì sao bỏ hướng V6.1
+Thuật toán chỉ có hai chế độ.
 
-File lịch sử cung cấp 2.418 phiên. V6.1 dự đoán 2.396 phiên và đạt khoảng 50,92%. Confidence trung bình của V6.1 cao hơn đáng kể tỷ lệ đúng thực tế, nên không thể coi các mức 60–64% là xác suất đã hiệu chuẩn.
+## 1. Bám phiên trước
 
-V7 thay đổi ba nguyên tắc:
+Mặc định, phiên tiếp theo chọn cùng cửa với kết quả vừa ra.
 
-1. Không gán trọng số lớn chỉ vì nhận dạng được tên cầu.
-2. Tách hành vi Bàn Hũ và MD5.
-3. Không bắt buộc phải dự đoán mọi phiên.
+- Phiên vừa ra Tài → dự đoán Tài.
+- Phiên vừa ra Xỉu → dự đoán Xỉu.
 
-## Mốc theo từng bàn
+## 2. Cầu 1-1
 
-Kết quả kiểm tra theo thứ tự thời gian cho thấy hai mốc đơn giản ổn định hơn hệ thống tên cầu cũ trong mẫu dữ liệu:
+Ngay khi ba kết quả cuối tạo thành một nhịp đảo:
 
-- MD5: ưu tiên tiếp tục phía của phiên gần nhất.
-- Bàn Hũ: dùng thiên lệch Tài rất nhẹ làm mốc.
+- `T-X-T`, hoặc
+- `X-T-X`
 
-Đây chỉ là mốc xác suất thấp, không phải khẳng định kết quả có quy luật chắc chắn.
+bot chuyển sang cầu 1-1 và chọn cửa đối diện kết quả vừa ra.
 
-## Tín hiệu thích nghi
+Ví dụ chuỗi `T-T-T-X-T` có hậu tố `T-X-T`, vì vậy phiên tiếp theo dự đoán `X`.
 
-Mỗi tín hiệu phụ được đánh giá ở mọi phiên bằng:
+Khi đang theo cầu 1-1:
 
-- số lần dự báo;
-- thắng/thua;
-- accuracy EWMA;
-- Brier score EWMA;
-- 20 kết quả gần nhất.
+- dự đoán đúng → tiếp tục đảo cửa;
+- dự đoán sai → coi là cầu gãy và quay về bám kết quả phiên vừa ra.
 
-Tín hiệu phải có ít nhất 20 lượt đánh giá, accuracy gần đây từ 55% và Brier score phù hợp mới được xem là `trusted`. Một tín hiệu đơn lẻ không được đảo chiều mốc chính; cần ít nhất hai tín hiệu đáng tin cùng phản đối.
-
-## Phát hiện đổi chế độ
-
-Engine so sánh sáu phiên gần nhất với sáu phiên trước đó bằng:
-
-- tỷ lệ Tài;
-- tỷ lệ đổi bên;
-- độ dài nhịp hiện tại.
-
-Khi `changeScore` cao, xác suất bị co mạnh hơn và có thể trả `SKIP`.
-
-## Kiểm soát confidence
-
-- Xác suất cuối bị giới hạn trong khoảng 45,5%–54,5%.
-- Confidence hiển thị chỉ từ 51%–55%.
-- Không dùng random.
-- Không dùng dữ liệu tương lai trong quá trình replay/backtest.
-
-## Chuỗi thua
-
-Sau ba dự đoán sai liên tiếp, engine nghỉ một phiên (`SKIP`) rồi tiếp tục với yêu cầu biên cao hơn. Cơ chế này nhằm giảm nhịp đặt lệnh liên tục, không làm tăng xác suất toán học của kết quả.
+Thuật toán không dùng Markov, mô hình chuyên gia, ngẫu nhiên, lịch sử dài hay cơ chế bỏ phiên.

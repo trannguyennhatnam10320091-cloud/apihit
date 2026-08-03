@@ -1,19 +1,6 @@
-HIT API V7.1 — Test report
-Date: 2026-08-03
-
-PASS:
-- JavaScript syntax
-- Predictor engine tests
-- Hũ/MD5 collector packet tests
-- Public API response tests
-- Admin token authorization tests
-- Reset Hũ statistics test
-- CSV export test
-- Historical backtest replay
-
-Backtest on 2,418 rounds:
-- MD5: 51.83% on 1,040 predictions
-- Bàn Hũ: 51.97% on 737 predictions
-- Combined: 51.89% on 1,777 predictions
-
-The backtest does not guarantee future results.
+HIT API V9
+- node --check: chạy trước khi đóng gói
+- npm test: chạy trước khi đóng gói
+- test nhận nhanh T-X-T và X-T-X
+- test cầu 1-1 gãy thì quay về bám phiên trước
+- test API và quyền quản trị giữ tương thích
