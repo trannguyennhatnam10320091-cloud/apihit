@@ -1,0 +1,17 @@
+{
+  "name": "hit-adaptive-runtime-api-v7",
+  "version": "7.1.0",
+  "description": "API runtime Bàn Hũ/Bàn MD5, đọc công khai; reset và xuất lịch sử được bảo vệ bằng khóa quản trị.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check predictor.js && node --check compact-api.js && node --check server.js && node --check tests/test-predictor.js && node --check tests/test-api.js && node --check tools/backtest.js && node --check tests/test-admin.js",
+    "test": "node tests/test-predictor.js && node tests/test-api.js && node tests/test-admin.js",
+    "backtest": "node tools/backtest.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}

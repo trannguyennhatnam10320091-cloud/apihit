@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: hit-api-v7-runtime
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: POLL_INTERVAL
+        value: 1500
+      - key: REQUEST_TIMEOUT
+        value: 8000
+      - key: MIN_HISTORY
+        value: 12
+      - key: MAX_ENGINE_HISTORY
+        value: 20
+      - key: MAX_RUNTIME_HISTORY
+        value: 10000
+      - key: PREDICT_EDGE
+        value: 0.014
+      - key: MIN_CONSENSUS
+        value: 0.56
+      - key: ADMIN_ACTION_TOKEN
+        sync: false
