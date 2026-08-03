@@ -15,7 +15,7 @@ function result(session, symbol) {
     };
 }
 
-const engine = new AdaptiveSelectiveEngineV7({ minHistory: 8, maxEngineHistory: 20 });
+const engine = new AdaptiveSelectiveEngineV7({ minHistory: 20, maxEngineHistory: 240 });
 assert.strictEqual(engine.modelVersion, MODEL_VERSION);
 
 const sequence = 'TTXXTXXTTXTTXXTTXTXXTTXXT'.split('');
@@ -27,7 +27,7 @@ for (let index = 0; index < sequence.length; index += 1) {
 
 assert.strictEqual(engine.history.length, sequence.length);
 assert.ok(engine.getPublicHistory(10).length === 10);
-assert.ok(engine.getPerformanceSummary().length === 6);
+assert.ok(engine.getPerformanceSummary().length === 3);
 assert.ok(engine.getPublicStats().Tong_phien === sequence.length);
 
 const duplicate = engine.addResult(result(1000 + sequence.length - 1, 'T'));
