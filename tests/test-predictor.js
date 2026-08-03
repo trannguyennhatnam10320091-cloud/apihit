@@ -34,6 +34,16 @@ const duplicate = engine.addResult(result(1000 + sequence.length - 1, 'T'));
 assert.strictEqual(duplicate.accepted, false);
 assert.strictEqual(duplicate.reason, 'DUPLICATE');
 
+const historyBeforeStatsReset = engine.history.length;
+engine.resetStats();
+assert.strictEqual(engine.history.length, historyBeforeStatsReset);
+assert.strictEqual(engine.getPublicStats().Tong_phien, 0);
+
+engine.stats.Tong_phien = 77;
+engine.clearHistory();
+assert.strictEqual(engine.history.length, 0);
+assert.strictEqual(engine.getPublicStats().Tong_phien, 77);
+
 engine.resetAll();
 assert.strictEqual(engine.history.length, 0);
 assert.strictEqual(engine.getPublicStats().Tong_phien, 0);

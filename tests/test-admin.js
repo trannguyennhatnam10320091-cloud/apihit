@@ -38,10 +38,20 @@ function request(port, method, path, token) {
         const exported = await request(port, 'GET', '/api/admin/export?board=all&format=csv', 'test-secret');
         assert.strictEqual(exported.status, 200);
         assert.ok(exported.body.includes('board,session'));
+        feeds.hit.engine.history.push({ Phien: 123, Ket_qua: 'Tài' });
         feeds.hit.engine.stats.Tong_phien = 99;
-        const reset = await request(port, 'POST', '/api/admin/reset?board=xanh', 'test-secret');
-        assert.strictEqual(reset.status, 200);
+        const resetStats = await request(port, 'POST', '/api/admin/reset?board=xanh&target=stats', 'test-secret');
+        assert.strictEqual(resetStats.status, 200);
         assert.strictEqual(feeds.hit.engine.getPublicStats().Tong_phien, 0);
+        assert.strictEqual(feeds.hit.engine.history.length, 1);
+
+        feeds.hit.engine.stats.Tong_phien = 45;
+        feeds.hit.latestApi.Phien = 123;
+        const clearHistory = await request(port, 'POST', '/api/admin/reset?board=xanh&target=history', 'test-secret');
+        assert.strictEqual(clearHistory.status, 200);
+        assert.strictEqual(feeds.hit.engine.history.length, 0);
+        assert.strictEqual(feeds.hit.engine.getPublicStats().Tong_phien, 45);
+        assert.strictEqual(feeds.hit.ignoreBeforeSid, 123);
         console.log('PASS test-admin');
     } finally {
         await new Promise(resolve => server.close(resolve));
